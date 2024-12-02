@@ -120,9 +120,11 @@ object QuicklensMacros {
     end PathSymbol
 
     def toPath(tree: Tree, focus: Expr[S => A]): Seq[PathSymbol] = {
+      println(s"toPath ${tree.show}: ${focus.asTerm.show}")
       tree match {
         /** Field access */
         case Select(deep, ident) =>
+          println(s"Select ${deep.show}, $ident")
           toPath(deep, focus) :+ PathSymbol.Field(ident)
         /** Method call with arguments and using clause */
         case Apply(Apply(Apply(TypeApply(Ident(s), typeTrees), idents), args), List(givn)) if methodSupported(s) =>
@@ -133,15 +135,24 @@ object QuicklensMacros {
         /** Method call with one type parameter and using clause */
         case a @ Apply(TypeApply(Apply(TypeApply(Ident(s), _), idents), typeTrees), List(givn)) if methodSupported(s) =>
           idents.flatMap(toPath(_, focus)) :+ PathSymbol.FunctionDelegate(s, givn, typeTrees.last, List.empty)
-        case Apply(Ident(ident), Seq(deep)) => // this is an extension method, which is called e.g. as x(_$1)
-          toPath(deep, focus) :+ PathSymbol.Field(ident)
+        case Apply(obj, Seq(deep)) => // this is an extension method, which is called e.g. as x(_$1)
+          println(s"Apply extension ${deep.show}, $obj: $deep, ${focus.asTerm.show}")
+          obj match
+            case Ident(ident) =>
+              toPath(deep, focus) :+ PathSymbol.Field(ident)
+            case Select(term, member) =>
+              report.errorAndAbort(unsupportedShapeInfo(focus.asTerm))
+            case other =>
+              report.errorAndAbort(unsupportedShapeInfo(focus.asTerm))
         /** Field access */
         case Apply(deep, idents) =>
+          println(s"Apply ${deep.show}, $idents")
           toPath(deep, focus) ++ idents.flatMap(toPath(_, focus))
         /** Wild card from path */
         case i: Ident if i.name.startsWith("_") =>
           Seq.empty
         case _ =>
+          println(s"Other $tree")
           report.errorAndAbort(unsupportedShapeInfo(focus.asTerm))
       }
     }
