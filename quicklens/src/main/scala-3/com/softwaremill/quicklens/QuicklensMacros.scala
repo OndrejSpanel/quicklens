@@ -235,6 +235,7 @@ object QuicklensMacros {
       *                on which the extension is called
       * */
     def callMethod(obj: Term, copy: Symbol, argsMap: List[Map[String, Term]]) = {
+      println(s"callMethod $obj $copy $argsMap")
       val objTpe = obj.tpe.widenAll
       val objSymbol = objTpe.matchingTypeSymbol
 
@@ -273,6 +274,7 @@ object QuicklensMacros {
           s"Implementation limitation: Only the first parameter list of the modified case classes can be non-implicit. ${copyTree.termParamss.drop(1)}"
         )
 
+      println(s"apply ${obj.show} $copy $argLists")
       val applyOn = typeParams match {
         // if the object's type is parametrised, we need to call .copy with the same type parameters
         case Some(typeParams) => TypeApply(Select(obj, copy), typeParams.map(Inferred(_)))
@@ -356,17 +358,29 @@ object QuicklensMacros {
           val namedArg = NamedArg(field.name, resTerm)
           field.name -> namedArg
         }.toMap
-        methodSymbolByNameAndArgs(objSymbol, "copy", argsMap) match
+        methodSymbolByNameAndArgs(objSymbol, "copy", argsMap).filter(m => m.owner == objSymbol) match
           case Some(copy) =>
+            println(s"Method copy (${copy.tree.show}) found in ${objSymbol.tree.show}")
             callMethod(obj, copy, List(argsMap))
           case None =>
-            val objCompanion = objSymbol.companionModule
-            methodSymbolByNameAndArgs(objCompanion, "copy", argsMap) match
+            val objCompanion = Option.when(!objSymbol.companionModule.isNoSymbol)(objSymbol.companionModule).orElse {
+              val enclosing = objSymbol.owner
+              val companionName = objSymbol.name
+              val candidate = enclosing.fieldMember(companionName)
+              if (!candidate.isNoSymbol)
+                println(s"Found companion in enclosing scope $enclosing")
+                Some(candidate)
+              else
+                println(s"Search companion in enclosing scope $enclosing")
+                None
+            }
+            objCompanion.flatMap(methodSymbolByNameAndArgs(_, "copy", argsMap)) match
               case Some(copy) =>
+                println(s"Method copy (${copy.tree.show}) found in ${objCompanion.get.tree.show}")
                 // now try to call the extension as a method, assume the object is its first parameter
                 val extensionParameter = copy.paramSymss.headOption.map(_.headOption).flatten
                 val argsWithObj = List(extensionParameter.map(name => name.name -> obj).toMap, argsMap)
-                callMethod(Ref(objCompanion), copy, argsWithObj)
+                callMethod(Ref(objCompanion.get), copy, argsWithObj)
               case None => report.errorAndAbort(noSuchMember(objSymbol.name, "copy"))
       } else
         report.errorAndAbort(s"Unsupported source object: must be a case class, sealed trait or class with copy method, but got: $objSymbol of type ${objTpe.show} (${obj.show})")
