@@ -472,6 +472,8 @@ object QuicklensMacros {
     val res: (Expr[A => A] => Expr[S]) = (mod: Expr[A => A]) =>
       Typed(mapToCopy(Symbol.spliceOwner, mod, obj.asTerm, pathTree), TypeTree.of[S]).asExpr.asInstanceOf[Expr[S]]
 
-    to(res)
+    val r = to(res)
+    println(s"Result: ${r.show}")
+    r
   }
 }

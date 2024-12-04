@@ -77,6 +77,9 @@ class ExtensionCopyTest extends AnyFlatSpec with Matchers {
     val a = VecClass(1, 2)
     val b = a.modify(_.x).using(_ + 10)
     assert(b.x == 11)
+
+    val v = V(10, 20)
+    v.modify(_.xm).using(_ + 100)
   }
   it should "modify an opaque type with extension methods" in {
     import ExtensionCopyTest.*
