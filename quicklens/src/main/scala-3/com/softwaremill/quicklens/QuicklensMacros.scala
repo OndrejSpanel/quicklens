@@ -190,7 +190,6 @@ object QuicklensMacros {
           case Nil =>
             findExtensionMethod(objSymbol, name) match {
               case List((owner, extension)) =>
-                println(s"Found extension member $name $owner $extension")
                 Apply(Select(owner, extension), List(obj))
               case syms =>
                 reportMethodError(objSymbol, name, syms.map(_._2))
@@ -240,7 +239,6 @@ object QuicklensMacros {
       *                on which the extension is called
       * */
     def callMethod(obj: Term, copy: Symbol, argsMap: List[Map[String, Term]]) = {
-      println(s"callMethod $obj $copy $argsMap")
       val objTpe = obj.tpe.widenAll
       val objSymbol = objTpe.matchingTypeSymbol
 
@@ -259,7 +257,6 @@ object QuicklensMacros {
           val methodSymbol = methodSymbolByNameOrError(objSymbol, copy.name + "$default$" + i.toString)
           // default values in extensions are obtained by calling a method receiving the extension parameter
           val defaultMethodArgs = argsMap.dropRight(1).headOption.toList.flatMap(_.values)
-          //println(s"defaultMethodArgs ${obj.show} ${methodSymbol.name} $defaultMethodArgs")
           if defaultMethodArgs.nonEmpty then
             Apply(Select(obj, methodSymbol), defaultMethodArgs)
           else
@@ -279,7 +276,6 @@ object QuicklensMacros {
           s"Implementation limitation: Only the first parameter list of the modified case classes can be non-implicit. ${copyTree.termParamss.drop(1)}"
         )
 
-      println(s"apply ${obj.show} $copy $argLists")
       val applyOn = typeParams match {
         // if the object's type is parametrised, we need to call .copy with the same type parameters
         case Some(typeParams) => TypeApply(Select(obj, copy), typeParams.map(Inferred(_)))
@@ -317,7 +313,6 @@ object QuicklensMacros {
       // TODO: try to search in symbol parent scope as well, as extension methods could be located there as well
       val symbols = findCompanionLikeObject(sym).filter(_ != Symbol.noSymbol).toList
 
-      println(s"${sym}: Methods of ${symbols} ${symbols.flatMap(_.declaredMethods)}")
       symbols.flatMap(s => s.declaredMethods.map(Ref(s) -> _)).filter((_, m) => m.name == methodName && isExtensionMethod(m)).toList
     }
 
@@ -367,7 +362,6 @@ object QuicklensMacros {
         val argsMap: Map[String, Term] = fields.map { (field, trees) =>
           val fieldMethod = symbolAccessorByNameOrError(obj, field.name)
           val resTerm: Term = trees.foldLeft[Term](fieldMethod) { (term, tree) =>
-            println(s"mapToCopy ${TypeRepr.of[S].show}, ${TypeRepr.of[A].show},  ${term.show}")
             mapToCopy(owner, mod, term, tree)
           }
           val namedArg = NamedArg(field.name, resTerm)
@@ -375,20 +369,9 @@ object QuicklensMacros {
         }.toMap
         methodSymbolByNameAndArgs(objSymbol, "copy", argsMap).filter(m => m.owner == objSymbol) match
           case Some(copy) =>
-            println(s"Method copy (${copy.tree.show}) found in ${objSymbol.tree.show}")
             callMethod(obj, copy, List(argsMap))
           case None =>
-            val objCompanion = Option.when(!objSymbol.companionModule.isNoSymbol)(objSymbol.companionModule).orElse {
-              val enclosing = objSymbol.owner
-              val companionName = objSymbol.name
-              val candidate = enclosing.fieldMember(companionName)
-              if (!candidate.isNoSymbol)
-                println(s"Found companion in enclosing scope $enclosing")
-                Some(candidate)
-              else
-                println(s"Search companion in enclosing scope $enclosing")
-                None
-            }
+            val objCompanion = findCompanionLikeObject(objSymbol)
             objCompanion.flatMap(methodSymbolByNameAndArgs(_, "copy", argsMap)) match
               case Some(copy) =>
                 println(s"Method copy (${copy.tree.show}) found in ${objCompanion.get.tree.show}")
