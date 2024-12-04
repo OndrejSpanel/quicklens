@@ -177,7 +177,9 @@ object QuicklensMacros {
     def symbolAccessorByNameOrError(obj: Term, name: String): Term = {
       val objTpe = obj.tpe.widenAll
       val objSymbol = objTpe.matchingTypeSymbol
-      val mem = objSymbol.fieldMember(name)
+      val mem = if !objSymbol.flags.is(Flags.Deferred) then
+        objSymbol.fieldMember(name)
+      else Symbol.noSymbol
       if (mem != Symbol.noSymbol)
         Select(obj, mem)
       else
@@ -188,6 +190,7 @@ object QuicklensMacros {
           case Nil =>
             findExtensionMethod(objSymbol, name) match {
               case List((owner, extension)) =>
+                println(s"Found extension member $name $owner $extension")
                 Apply(Select(owner, extension), List(obj))
               case syms =>
                 reportMethodError(objSymbol, name, syms.map(_._2))
@@ -226,8 +229,10 @@ object QuicklensMacros {
     }
 
     def methodSymbolByNameAndArgs(sym: Symbol, name: String, argsMap: Map[String, Term]): Option[Symbol] = {
-      val memberMethods = sym.methodMember(name)
-      filterMethodsByNameAndArgs(memberMethods, argsMap)
+      if !sym.flags.is(Flags.Deferred) then
+        val memberMethods = sym.methodMember(name)
+        filterMethodsByNameAndArgs(memberMethods, argsMap)
+      else None
     }
 
     /**
@@ -297,13 +302,22 @@ object QuicklensMacros {
       (sym.flags.is(Flags.Sealed) && (sym.flags.is(Flags.Trait) || sym.flags.is(Flags.Abstract)))
     }
 
+    def findCompanionLikeObject(objSymbol: Symbol): Option[Symbol] = {
+      def optSymbol(objSymbol: Symbol) = Option.when(!objSymbol.isNoSymbol)(objSymbol)
+      optSymbol(objSymbol.companionModule).orElse {
+        // for opaque types, the companion type is not found by objSymbol.companionModule
+        // try to find an object by name in the owner scope
+        optSymbol(objSymbol.owner.fieldMember(objSymbol.name)).filter(_.flags.is(Flags.Module))
+      }
+    }
     def findExtensionMethod(using Quotes)(sym: Symbol, methodName: String): List[(Term, Symbol)] = {
       // TODO: can we check parameter types somehow?
       def isExtensionMethod(sym: Symbol): Boolean = sym.isDefDef && sym.paramSymss.headOption.exists(_.sizeIs == 1)
 
-      // TODO: try to search in symbol parent object as well
-      val symbols = Seq(sym.companionModule).filter(_ != Symbol.noSymbol)
+      // TODO: try to search in symbol parent scope as well, as extension methods could be located there as well
+      val symbols = findCompanionLikeObject(sym).filter(_ != Symbol.noSymbol).toList
 
+      println(s"${sym}: Methods of ${symbols} ${symbols.flatMap(_.declaredMethods)}")
       symbols.flatMap(s => s.declaredMethods.map(Ref(s) -> _)).filter((_, m) => m.name == methodName && isExtensionMethod(m)).toList
     }
 
@@ -353,6 +367,7 @@ object QuicklensMacros {
         val argsMap: Map[String, Term] = fields.map { (field, trees) =>
           val fieldMethod = symbolAccessorByNameOrError(obj, field.name)
           val resTerm: Term = trees.foldLeft[Term](fieldMethod) { (term, tree) =>
+            println(s"mapToCopy ${TypeRepr.of[S].show}, ${TypeRepr.of[A].show},  ${term.show}")
             mapToCopy(owner, mod, term, tree)
           }
           val namedArg = NamedArg(field.name, resTerm)
